@@ -29,6 +29,15 @@ const isValidMavenArgs = (
   typeof args.dependency === 'string' &&
   args.dependency.includes(':');
 
+const isValidVersionCheckArgs = (
+  args: any
+): args is { dependency: string; version: string } =>
+  typeof args === 'object' &&
+  args !== null &&
+  typeof args.dependency === 'string' &&
+  args.dependency.includes(':') &&
+  typeof args.version === 'string';
+
 class MavenDepsServer {
   private server: Server;
   private axiosInstance;
@@ -77,75 +86,148 @@ class MavenDepsServer {
             required: ['dependency'],
           },
         },
+        {
+          name: 'check_maven_version_exists',
+          description: 'Check if a specific version of a Maven dependency exists',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              dependency: {
+                type: 'string',
+                description: 'Maven dependency in format "groupId:artifactId" (e.g. "org.springframework:spring-core")',
+              },
+              version: {
+                type: 'string',
+                description: 'Version to check (e.g. "5.3.20")',
+              },
+            },
+            required: ['dependency', 'version'],
+          },
+        },
       ],
     }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      if (request.params.name !== 'get_maven_latest_version') {
-        throw new McpError(
-          ErrorCode.MethodNotFound,
-          `Unknown tool: ${request.params.name}`
-        );
+      switch (request.params.name) {
+        case 'get_maven_latest_version':
+          return this.handleGetLatestVersion(request.params.arguments);
+        case 'check_maven_version_exists':
+          return this.handleCheckVersionExists(request.params.arguments);
+        default:
+          throw new McpError(
+            ErrorCode.MethodNotFound,
+            `Unknown tool: ${request.params.name}`
+          );
       }
+    });
+  }
 
-      if (!isValidMavenArgs(request.params.arguments)) {
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          'Invalid Maven dependency format. Expected "groupId:artifactId"'
-        );
-      }
+  private async handleGetLatestVersion(args: unknown) {
+    if (!isValidMavenArgs(args)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Invalid Maven dependency format. Expected "groupId:artifactId"'
+      );
+    }
 
-      const [groupId, artifactId] = request.params.arguments.dependency.split(':');
+    const [groupId, artifactId] = args.dependency.split(':');
 
-      try {
-        const response = await this.axiosInstance.get<MavenSearchResponse>('', {
-          params: {
-            q: `g:"${groupId}" AND a:"${artifactId}"`,
-            core: 'gav',
-            rows: 1,
-            wt: 'json',
-            sort: 'timestamp desc',
-          },
-        });
+    try {
+      const response = await this.axiosInstance.get<MavenSearchResponse>('', {
+        params: {
+          q: `g:"${groupId}" AND a:"${artifactId}"`,
+          core: 'gav',
+          rows: 1,
+          wt: 'json',
+          sort: 'timestamp desc',
+        },
+      });
 
-        if (!response.data.response.docs.length) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `No Maven dependency found for ${groupId}:${artifactId}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const latestVersion = response.data.response.docs[0].v;
+      if (!response.data.response.docs.length) {
         return {
           content: [
             {
               type: 'text',
-              text: latestVersion,
+              text: `No Maven dependency found for ${groupId}:${artifactId}`,
             },
           ],
+          isError: true,
         };
-      } catch (error) {
-        if (axios.isAxiosError(error)) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Maven Central API error: ${
-                  error.response?.data?.error?.msg ?? error.message
-                }`,
-              },
-            ],
-            isError: true,
-          };
-        }
-        throw error;
       }
-    });
+
+      const latestVersion = response.data.response.docs[0].v;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: latestVersion,
+          },
+        ],
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Maven Central API error: ${
+                error.response?.data?.error?.msg ?? error.message
+              }`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      throw error;
+    }
+  }
+
+  private async handleCheckVersionExists(args: unknown) {
+    if (!isValidVersionCheckArgs(args)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Invalid arguments. Expected "dependency" (groupId:artifactId) and "version"'
+      );
+    }
+
+    const [groupId, artifactId] = args.dependency.split(':');
+    const version = args.version;
+
+    try {
+      const response = await this.axiosInstance.get<MavenSearchResponse>('', {
+        params: {
+          q: `g:"${groupId}" AND a:"${artifactId}" AND v:"${version}"`,
+          core: 'gav',
+          rows: 1,
+          wt: 'json',
+        },
+      });
+
+      const exists = response.data.response.docs.length > 0;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: exists ? 'true' : 'false',
+          },
+        ],
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Maven Central API error: ${
+                error.response?.data?.error?.msg ?? error.message
+              }`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      throw error;
+    }
   }
 
   async run() {

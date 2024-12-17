@@ -6,6 +6,7 @@ An MCP (Model Context Protocol) server that provides tools for checking Maven de
 
 - Query the latest version of any Maven dependency
 - Verify if a Maven dependency exists
+- Check if a specific version of a dependency exists
 - Real-time access to Maven Central Repository data
 
 ## Installation
@@ -63,21 +64,58 @@ const result = await mcpClient.callTool("maven-deps-server", "get_maven_latest_v
 // Returns: "6.2.1"
 ```
 
+### check_maven_version_exists
+
+Checks if a specific version of a Maven dependency exists.
+
+**Input Schema:**
+```json
+{
+  "type": "object",
+  "properties": {
+    "dependency": {
+      "type": "string",
+      "description": "Maven dependency in format \"groupId:artifactId\" (e.g. \"org.springframework:spring-core\")"
+    },
+    "version": {
+      "type": "string",
+      "description": "Version to check (e.g. \"5.3.20\")"
+    }
+  },
+  "required": ["dependency", "version"]
+}
+```
+
+**Example Usage:**
+```typescript
+const result = await mcpClient.callTool("maven-deps-server", "check_maven_version_exists", {
+  dependency: "org.springframework:spring-core",
+  version: "5.3.20"
+});
+// Returns: "true" or "false"
+```
+
 ## Example Responses
 
-### Valid Dependency
+### Latest Version Check
 ```typescript
 // Input: org.springframework:spring-core
 "6.2.1"
 
 // Input: org.apache.kafka:kafka-clients
 "3.7.2"
-```
 
-### Invalid Dependency
-```typescript
 // Input: nonexistent.group:fake-artifact
 "No Maven dependency found for nonexistent.group:fake-artifact"
+```
+
+### Version Existence Check
+```typescript
+// Input: { dependency: "org.springframework:spring-core", version: "5.3.20" }
+"true"
+
+// Input: { dependency: "org.springframework:spring-core", version: "0.0.1" }
+"false"
 ```
 
 ## Implementation Details
@@ -86,11 +124,13 @@ const result = await mcpClient.callTool("maven-deps-server", "get_maven_latest_v
 - Sorts results by timestamp to ensure the latest version is returned
 - Includes error handling for invalid dependencies and API issues
 - Returns clean, parseable version strings for valid dependencies
+- Provides boolean responses for version existence checks
 
 ## Error Handling
 
 The server handles various error cases:
 - Invalid dependency format
+- Invalid version format
 - Non-existent dependencies
 - API connection issues
 - Malformed responses
