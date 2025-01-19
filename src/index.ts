@@ -16,27 +16,52 @@ interface MavenSearchResponse {
       g: string; // groupId
       a: string; // artifactId
       v: string; // version
+      p?: string; // packaging
       timestamp: number;
     }>;
   };
 }
+
+interface MavenCoordinate {
+  groupId: string;
+  artifactId: string;
+  version?: string;
+  packaging?: string;
+  classifier?: string;
+}
+
+const parseMavenCoordinate = (dependency: string): MavenCoordinate => {
+  const parts = dependency.split(':');
+  if (parts.length < 2) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'Invalid Maven coordinate format. Minimum format is "groupId:artifactId"'
+    );
+  }
+
+  return {
+    groupId: parts[0],
+    artifactId: parts[1],
+    version: parts[2],
+    packaging: parts[3],
+    classifier: parts[4]
+  };
+};
 
 const isValidMavenArgs = (
   args: any
 ): args is { dependency: string } =>
   typeof args === 'object' &&
   args !== null &&
-  typeof args.dependency === 'string' &&
-  args.dependency.includes(':');
+  typeof args.dependency === 'string';
 
 const isValidVersionCheckArgs = (
   args: any
-): args is { dependency: string; version: string } =>
+): args is { dependency: string; version?: string } =>
   typeof args === 'object' &&
   args !== null &&
   typeof args.dependency === 'string' &&
-  args.dependency.includes(':') &&
-  typeof args.version === 'string';
+  (args.version === undefined || typeof args.version === 'string');
 
 class MavenDepsServer {
   private server: Server;
@@ -80,7 +105,7 @@ class MavenDepsServer {
             properties: {
               dependency: {
                 type: 'string',
-                description: 'Maven dependency in format "groupId:artifactId" (e.g. "org.springframework:spring-core")',
+                description: 'Maven coordinate in format "groupId:artifactId[:version][:packaging][:classifier]" (e.g. "org.springframework:spring-core" or "org.springframework:spring-core:5.3.20:jar")',
               },
             },
             required: ['dependency'],
@@ -94,14 +119,14 @@ class MavenDepsServer {
             properties: {
               dependency: {
                 type: 'string',
-                description: 'Maven dependency in format "groupId:artifactId" (e.g. "org.springframework:spring-core")',
+                description: 'Maven coordinate in format "groupId:artifactId[:version][:packaging][:classifier]" (e.g. "org.springframework:spring-core" or "org.springframework:spring-core:5.3.20:jar")',
               },
               version: {
                 type: 'string',
-                description: 'Version to check (e.g. "5.3.20")',
+                description: 'Version to check if not included in dependency string',
               },
             },
-            required: ['dependency', 'version'],
+            required: ['dependency'],
           },
         },
       ],
@@ -126,16 +151,21 @@ class MavenDepsServer {
     if (!isValidMavenArgs(args)) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        'Invalid Maven dependency format. Expected "groupId:artifactId"'
+        'Invalid Maven dependency format'
       );
     }
 
-    const [groupId, artifactId] = args.dependency.split(':');
+    const coord = parseMavenCoordinate(args.dependency);
 
     try {
+      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
+      if (coord.packaging) {
+        query += ` AND p:"${coord.packaging}"`;
+      }
+
       const response = await this.axiosInstance.get<MavenSearchResponse>('', {
         params: {
-          q: `g:"${groupId}" AND a:"${artifactId}"`,
+          q: query,
           core: 'gav',
           rows: 1,
           wt: 'json',
@@ -148,7 +178,7 @@ class MavenDepsServer {
           content: [
             {
               type: 'text',
-              text: `No Maven dependency found for ${groupId}:${artifactId}`,
+              text: `No Maven dependency found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}`,
             },
           ],
           isError: true,
@@ -186,17 +216,30 @@ class MavenDepsServer {
     if (!isValidVersionCheckArgs(args)) {
       throw new McpError(
         ErrorCode.InvalidParams,
-        'Invalid arguments. Expected "dependency" (groupId:artifactId) and "version"'
+        'Invalid Maven dependency format'
       );
     }
 
-    const [groupId, artifactId] = args.dependency.split(':');
-    const version = args.version;
+    const coord = parseMavenCoordinate(args.dependency);
+    // Use version from coordinate if available, otherwise use the version parameter
+    const version = coord.version || args.version;
+    
+    if (!version) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Version must be provided either in dependency string or version parameter'
+      );
+    }
 
     try {
+      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}" AND v:"${version}"`;
+      if (coord.packaging) {
+        query += ` AND p:"${coord.packaging}"`;
+      }
+
       const response = await this.axiosInstance.get<MavenSearchResponse>('', {
         params: {
-          q: `g:"${groupId}" AND a:"${artifactId}" AND v:"${version}"`,
+          q: query,
           core: 'gav',
           rows: 1,
           wt: 'json',
