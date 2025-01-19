@@ -9,7 +9,9 @@ An MCP (Model Context Protocol) server that provides tools for checking Maven de
 - Query the latest version of any Maven dependency
 - Verify if a Maven dependency exists
 - Check if a specific version of a dependency exists
+- Support for full Maven coordinates including packaging and classifier
 - Real-time access to Maven Central Repository data
+- Compatible with multiple build tool formats (Maven, Gradle, SBT, Mill)
 
 ## Installation
 
@@ -51,7 +53,7 @@ Retrieves the latest version of a Maven dependency.
   "properties": {
     "dependency": {
       "type": "string",
-      "description": "Maven dependency in format \"groupId:artifactId\" (e.g. \"org.springframework:spring-core\")"
+      "description": "Maven coordinate in format \"groupId:artifactId[:version][:packaging][:classifier]\" (e.g. \"org.springframework:spring-core\" or \"org.springframework:spring-core:5.3.20:jar\")"
     }
   },
   "required": ["dependency"]
@@ -63,12 +65,12 @@ Retrieves the latest version of a Maven dependency.
 const result = await mcpClient.callTool("maven-deps-server", "get_maven_latest_version", {
   dependency: "org.springframework:spring-core"
 });
-// Returns: "6.2.1"
+// Returns: "6.2.2"
 ```
 
 ### check_maven_version_exists
 
-Checks if a specific version of a Maven dependency exists.
+Checks if a specific version of a Maven dependency exists. The version can be provided either in the dependency string or as a separate parameter.
 
 **Input Schema:**
 ```json
@@ -77,52 +79,33 @@ Checks if a specific version of a Maven dependency exists.
   "properties": {
     "dependency": {
       "type": "string",
-      "description": "Maven dependency in format \"groupId:artifactId\" (e.g. \"org.springframework:spring-core\")"
+      "description": "Maven coordinate in format \"groupId:artifactId[:version][:packaging][:classifier]\" (e.g. \"org.springframework:spring-core\" or \"org.springframework:spring-core:5.3.20:jar\")"
     },
     "version": {
       "type": "string",
-      "description": "Version to check (e.g. \"5.3.20\")"
+      "description": "Version to check if not included in dependency string"
     }
   },
-  "required": ["dependency", "version"]
+  "required": ["dependency"]
 }
 ```
 
 **Example Usage:**
 ```typescript
-const result = await mcpClient.callTool("maven-deps-server", "check_maven_version_exists", {
+// Using version in dependency string
+const result1 = await mcpClient.callTool("maven-deps-server", "check_maven_version_exists", {
+  dependency: "org.springframework:spring-core:5.3.20"
+});
+
+// Using separate version parameter
+const result2 = await mcpClient.callTool("maven-deps-server", "check_maven_version_exists", {
   dependency: "org.springframework:spring-core",
   version: "5.3.20"
 });
-// Returns: "true" or "false"
-```
-
-## Example Responses
-
-### Latest Version Check
-```typescript
-// Input: org.springframework:spring-core
-"6.2.1"
-
-// Input: org.apache.kafka:kafka-clients
-"3.7.2"
-
-// Input: nonexistent.group:fake-artifact
-"No Maven dependency found for nonexistent.group:fake-artifact"
-```
-
-### Version Existence Check
-```typescript
-// Input: { dependency: "org.springframework:spring-core", version: "5.3.20" }
-"true"
-
-// Input: { dependency: "org.springframework:spring-core", version: "0.0.1" }
-"false"
-```
-
 ## Implementation Details
 
 - Uses Maven Central's REST API to fetch dependency information
+- Supports full Maven coordinates (groupId:artifactId:version:packaging:classifier)
 - Sorts results by timestamp to ensure the latest version is returned
 - Includes error handling for invalid dependencies and API issues
 - Returns clean, parseable version strings for valid dependencies
@@ -136,6 +119,7 @@ The server handles various error cases:
 - Non-existent dependencies
 - API connection issues
 - Malformed responses
+- Missing version information
 
 ## Development
 
