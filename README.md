@@ -102,6 +102,8 @@ const result2 = await mcpClient.callTool("maven-deps-server", "check_maven_versi
   dependency: "org.springframework:spring-core",
   version: "5.3.20"
 });
+```
+
 ## Implementation Details
 
 - Uses Maven Central's REST API to fetch dependency information
