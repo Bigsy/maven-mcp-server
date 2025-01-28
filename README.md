@@ -1,5 +1,7 @@
 # Maven Dependencies MCP Server
 
+[![smithery badge](https://smithery.ai/badge/maven-deps-server)](https://smithery.ai/server/maven-deps-server)
+
 An MCP (Model Context Protocol) server that provides tools for checking Maven dependency versions. This server enables LLMs to verify Maven dependencies and retrieve their latest versions from Maven Central Repository.
 
 <a href="https://glama.ai/mcp/servers/juuo2ye0qi"><img width="380" height="200" src="https://glama.ai/mcp/servers/juuo2ye0qi/badge" alt="maven-mcp-server MCP server" /></a>
@@ -15,6 +17,15 @@ An MCP (Model Context Protocol) server that provides tools for checking Maven de
 
 ## Installation
 
+### Installing via Smithery
+
+To install Maven Dependencies Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/maven-deps-server):
+
+```bash
+npx -y @smithery/cli install maven-deps-server --client claude
+```
+
+### Manual Installation
 1. Clone or download this repository
 2. Install dependencies:
 ```bash
