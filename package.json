@@ -34,6 +34,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-username/maven-deps-server.git"
+    "url": "git+https://github.com/Bigsy/maven-mcp-server"
   }
 }
