@@ -1,11 +1,10 @@
 {
-  "name": "maven-deps-server",
+  "name": "mcp-maven-deps",
   "version": "0.1.0",
-  "description": "A Model Context Protocol server",
-  "private": true,
+  "description": "An MCP server that provides tools for checking Maven dependency versions",
   "type": "module",
   "bin": {
-    "maven-deps-server": "./build/index.js"
+    "mcp-maven-deps": "./build/index.js"
   },
   "files": [
     "build"
@@ -23,5 +22,18 @@
   "devDependencies": {
     "@types/node": "^20.11.24",
     "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "mcp",
+    "maven",
+    "dependencies",
+    "model-context-protocol",
+    "llm"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/maven-deps-server.git"
   }
 }

@@ -15,15 +15,23 @@ An MCP (Model Context Protocol) server that provides tools for checking Maven de
 
 ## Installation
 
-1. Clone or download this repository
-2. Install dependencies:
+You can install this MCP server globally using npm:
+
 ```bash
-npm install
+npm install -g mcp-maven-deps
 ```
-3. Build the server:
+
+Or run it directly using npx:
+
 ```bash
-npm run build
+npx mcp-maven-deps
 ```
+
+For development:
+
+1. Clone this repository
+2. Install dependencies: `npm install`
+3. Build the server: `npm run build`
 
 ## Configuration
 
@@ -33,8 +41,20 @@ Add the server to your MCP settings configuration file:
 {
   "mcpServers": {
     "maven-deps-server": {
-      "command": "node",
-      "args": ["/path/to/maven-deps-server/build/index.js"]
+      "command": "npx",
+      "args": ["mcp-maven-deps"]
+    }
+  }
+}
+```
+
+If installed globally, you can also use:
+
+```json
+{
+  "mcpServers": {
+    "maven-deps-server": {
+      "command": "mcp-maven-deps"
     }
   }
 }
