@@ -27,6 +27,14 @@ Or run it directly using npx:
 npx mcp-maven-deps
 ```
 
+### Installing via Smithery
+
+To install Maven Dependencies Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/maven-deps-server):
+
+```bash
+npx -y @smithery/cli install maven-deps-server --client claude
+```
+
 For development:
 
 1. Clone this repository
