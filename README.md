@@ -1,17 +1,10 @@
+<a href="https://www.npmjs.com/package/mcp-maven-deps"><img src="https://img.shields.io/npm/v/mcp-maven-deps.svg" alt="npm version" /></a>
 # Maven Dependencies MCP Server
 
 An MCP (Model Context Protocol) server that provides tools for checking Maven dependency versions. This server enables LLMs to verify Maven dependencies and retrieve their latest versions from Maven Central Repository.
 
-<a href="https://glama.ai/mcp/servers/juuo2ye0qi"><img width="380" height="200" src="https://glama.ai/mcp/servers/juuo2ye0qi/badge" alt="maven-mcp-server MCP server" /></a>
+<a href="https://glama.ai/mcp/servers/juuo2ye0qi"><img width="380" height="200" src="https://glama.ai/mcp/servers/juuo2ye0qi/badge" alt="maven-mcp-server MCP server" /></a> 
 
-## Features
-
-- Query the latest version of any Maven dependency
-- Verify if a Maven dependency exists
-- Check if a specific version of a dependency exists
-- Support for full Maven coordinates including packaging and classifier
-- Real-time access to Maven Central Repository data
-- Compatible with multiple build tool formats (Maven, Gradle, SBT, Mill)
 
 ## Installation
 
@@ -34,6 +27,17 @@ To install Maven Dependencies Server for Claude Desktop automatically via [Smith
 ```bash
 npx -y @smithery/cli install maven-deps-server --client claude
 ```
+
+## Features
+
+- Query the latest version of any Maven dependency
+- Verify if a Maven dependency exists
+- Check if a specific version of a dependency exists
+- Support for full Maven coordinates including packaging and classifier
+- Real-time access to Maven Central Repository data
+- Compatible with multiple build tool formats (Maven, Gradle, SBT, Mill)
+
+
 
 For development:
 
