@@ -27,6 +27,7 @@
     "mcp",
     "maven",
     "dependencies",
+    "cline",
     "model-context-protocol",
     "llm"
   ],
