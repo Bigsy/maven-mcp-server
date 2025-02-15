@@ -167,9 +167,8 @@ class MavenDepsServer {
         params: {
           q: query,
           core: 'gav',
-          rows: 1,
+          rows: 100,
           wt: 'json',
-          sort: 'timestamp desc',
         },
       });
 
@@ -185,7 +184,20 @@ class MavenDepsServer {
         };
       }
 
-      const latestVersion = response.data.response.docs[0].v;
+      const versions = response.data.response.docs.map(doc => doc.v);
+      const latestVersion = versions.sort((a, b) => {
+        const aParts = a.split('.').map(Number);
+        const bParts = b.split('.').map(Number);
+        
+        for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+          const aNum = aParts[i] || 0;
+          const bNum = bParts[i] || 0;
+          if (aNum !== bNum) {
+            return bNum - aNum;
+          }
+        }
+        return 0;
+      })[0];
       return {
         content: [
           {
