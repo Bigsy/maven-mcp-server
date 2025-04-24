@@ -72,6 +72,49 @@ If installed globally, you can also use:
 }
 ```
 
+## Transport Options
+
+The server supports two transport modes:
+
+1. **stdio** (default) - Standard input/output communication
+2. **SSE** (Server-Sent Events) - HTTP-based communication with optional remote access
+
+To use SSE transport, you can specify both host and port:
+
+```bash
+# Local access only (default host: localhost)
+npx mcp-maven-deps --port=3000
+
+# Remote access
+npx mcp-maven-deps --host=0.0.0.0 --port=3000
+```
+
+When using SSE transport in your MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "maven-deps-server": {
+      "command": "npx",
+      "args": ["mcp-maven-deps", "--port=3000"]
+    }
+  }
+}
+```
+
+For remote access, use the server's IP or hostname in your client configuration:
+
+```json
+{
+  "mcpServers": {
+    "maven-deps-server": {
+      "command": "npx",
+      "args": ["mcp-maven-deps", "--host=your-server-ip", "--port=3000"]
+    }
+  }
+}
+```
+
 ## Available Tools
 
 ### get_maven_latest_version

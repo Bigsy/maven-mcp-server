@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { createServer } from 'http';
+import express, { Request, Response } from 'express';
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -285,12 +288,57 @@ class MavenDepsServer {
     }
   }
 
-  async run() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('Maven Dependencies MCP server running on stdio');
+  async run(opts?: { port?: number; host?: string }) {
+    let transport: StdioServerTransport | SSEServerTransport | undefined;
+    
+    if (opts?.port) {
+      const app = express();
+      const httpServer = createServer(app);
+      let currentTransport: SSEServerTransport | undefined;
+
+      app.get('/sse', (req: Request, res: Response) => {
+        currentTransport = new SSEServerTransport('/mcp', res);
+        transport = currentTransport;
+        this.server.connect(transport).catch(console.error);
+        res.on('close', () => {
+          console.error('SSE connection closed');
+          if (currentTransport) {
+            this.server.close();
+            currentTransport = undefined;
+            transport = undefined;
+          }
+        });
+      });
+
+      app.post('/mcp', express.json(), (req: Request, res: Response) => {
+        if (!currentTransport) {
+          res.status(400).send('No active SSE connection');
+          return;
+        }
+        res.json({ message: 'Message received' });
+      });
+
+      const host = opts.host || 'localhost';
+      await new Promise<void>((resolve) => {
+        httpServer.listen(opts.port, host, () => {
+          console.error(`Maven Dependencies MCP server running on SSE at http://${host}:${opts.port}`);
+          resolve();
+        });
+      });
+    } else {
+      transport = new StdioServerTransport();
+      await this.server.connect(transport);
+      console.error('Maven Dependencies MCP server running on stdio');
+    }
   }
 }
 
 const server = new MavenDepsServer();
-server.run().catch(console.error);
+
+// Check if port is provided as command line argument
+const portArg = process.argv.find(arg => arg.startsWith('--port='));
+const port = portArg ? parseInt(portArg.split('=')[1]) : undefined;
+const hostArg = process.argv.find(arg => arg.startsWith('--host='));
+const host = hostArg ? hostArg.split('=')[1] : undefined;
+
+server.run({ port, host }).catch(console.error);
