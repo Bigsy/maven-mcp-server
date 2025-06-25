@@ -66,6 +66,14 @@ const isValidVersionCheckArgs = (
   typeof args.dependency === 'string' &&
   (args.version === undefined || typeof args.version === 'string');
 
+const isValidListVersionsArgs = (
+  args: any
+): args is { dependency: string; depth?: number } =>
+  typeof args === 'object' &&
+  args !== null &&
+  typeof args.dependency === 'string' &&
+  (args.depth === undefined || (typeof args.depth === 'number' && args.depth > 0));
+
 class MavenDepsServer {
   private server: Server;
   private axiosInstance;
@@ -132,6 +140,26 @@ class MavenDepsServer {
             required: ['dependency'],
           },
         },
+        {
+          name: 'list_maven_versions',
+          description: 'List Maven dependency versions chronologically (newest first)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              dependency: {
+                type: 'string',
+                description: 'Maven coordinate in format "groupId:artifactId[:packaging][:classifier]" (e.g. "org.springframework:spring-core" or "org.springframework:spring-core:jar")',
+              },
+              depth: {
+                type: 'number',
+                description: 'Number of versions to return (default: 15)',
+                minimum: 1,
+                maximum: 100,
+              },
+            },
+            required: ['dependency'],
+          },
+        },
       ],
     }));
 
@@ -141,6 +169,8 @@ class MavenDepsServer {
           return this.handleGetLatestVersion(request.params.arguments);
         case 'check_maven_version_exists':
           return this.handleCheckVersionExists(request.params.arguments);
+        case 'list_maven_versions':
+          return this.handleListVersions(request.params.arguments);
         default:
           throw new McpError(
             ErrorCode.MethodNotFound,
@@ -267,6 +297,76 @@ class MavenDepsServer {
           {
             type: 'text',
             text: exists ? 'true' : 'false',
+          },
+        ],
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Maven Central API error: ${
+                error.response?.data?.error?.msg ?? error.message
+              }`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      throw error;
+    }
+  }
+
+  private async handleListVersions(args: unknown) {
+    if (!isValidListVersionsArgs(args)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'Invalid Maven dependency format'
+      );
+    }
+
+    const coord = parseMavenCoordinate(args.dependency);
+    const depth = args.depth || 15;
+
+    try {
+      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
+      if (coord.packaging) {
+        query += ` AND p:"${coord.packaging}"`;
+      }
+
+      const response = await this.axiosInstance.get<MavenSearchResponse>('', {
+        params: {
+          q: query,
+          core: 'gav',
+          rows: 100,
+          wt: 'json',
+          sort: 'timestamp desc',
+        },
+      });
+
+      if (!response.data.response.docs.length) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `No Maven dependency found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const versions = response.data.response.docs
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, depth)
+        .map(doc => `${doc.v} (${new Date(doc.timestamp).toISOString().split('T')[0]})`);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: versions.join('\n'),
           },
         ],
       };

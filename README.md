@@ -33,6 +33,7 @@ npx -y @smithery/cli install maven-deps-server --client claude
 - Query the latest version of any Maven dependency
 - Verify if a Maven dependency exists
 - Check if a specific version of a dependency exists
+- List Maven dependency versions chronologically (newest first)
 - Support for full Maven coordinates including packaging and classifier
 - Real-time access to Maven Central Repository data
 - Compatible with multiple build tool formats (Maven, Gradle, SBT, Mill)
@@ -177,6 +178,50 @@ const result2 = await mcpClient.callTool("maven-deps-server", "check_maven_versi
   dependency: "org.springframework:spring-core",
   version: "5.3.20"
 });
+```
+
+### list_maven_versions
+
+Lists Maven dependency versions chronologically (newest first) with optional depth parameter.
+
+**Input Schema:**
+```json
+{
+  "type": "object",
+  "properties": {
+    "dependency": {
+      "type": "string",
+      "description": "Maven coordinate in format \"groupId:artifactId[:packaging][:classifier]\" (e.g. \"org.springframework:spring-core\" or \"org.springframework:spring-core:jar\")"
+    },
+    "depth": {
+      "type": "number",
+      "description": "Number of versions to return (default: 15)",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "required": ["dependency"]
+}
+```
+
+**Example Usage:**
+```typescript
+// Get last 15 versions (default)
+const result1 = await mcpClient.callTool("maven-deps-server", "list_maven_versions", {
+  dependency: "org.springframework:spring-core"
+});
+
+// Get last 5 versions
+const result2 = await mcpClient.callTool("maven-deps-server", "list_maven_versions", {
+  dependency: "org.springframework:spring-core",
+  depth: 5
+});
+// Returns: 
+// "7.0.0-M6 (2025-06-12)
+// 6.2.8 (2025-06-12)
+// 6.1.21 (2025-06-12)
+// 7.0.0-M5 (2025-05-15)
+// 6.2.7 (2025-05-15)"
 ```
 
 ## Implementation Details
