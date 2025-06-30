@@ -51,6 +51,12 @@ const parseMavenCoordinate = (dependency: string): MavenCoordinate => {
   };
 };
 
+const isPreReleaseVersion = (version: string): boolean => {
+  // Maven pre-release qualifiers: alpha, beta, milestone, rc/cr, snapshot
+  const preReleasePattern = /-(alpha|a|beta|b|milestone|m|rc|cr|snapshot)/i;
+  return preReleasePattern.test(version);
+};
+
 const isValidMavenArgs = (
   args: any
 ): args is { dependency: string } =>
@@ -66,13 +72,22 @@ const isValidVersionCheckArgs = (
   typeof args.dependency === 'string' &&
   (args.version === undefined || typeof args.version === 'string');
 
-const isValidListVersionsArgs = (
+const isValidReleaseArgs = (
   args: any
-): args is { dependency: string; depth?: number } =>
+): args is { dependency: string; excludePreReleases?: boolean } =>
   typeof args === 'object' &&
   args !== null &&
   typeof args.dependency === 'string' &&
-  (args.depth === undefined || (typeof args.depth === 'number' && args.depth > 0));
+  (args.excludePreReleases === undefined || typeof args.excludePreReleases === 'boolean');
+
+const isValidListVersionsArgs = (
+  args: any
+): args is { dependency: string; depth?: number; excludePreReleases?: boolean } =>
+  typeof args === 'object' &&
+  args !== null &&
+  typeof args.dependency === 'string' &&
+  (args.depth === undefined || (typeof args.depth === 'number' && args.depth > 0)) &&
+  (args.excludePreReleases === undefined || typeof args.excludePreReleases === 'boolean');
 
 class MavenDepsServer {
   private server: Server;
@@ -109,14 +124,19 @@ class MavenDepsServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
-          name: 'get_maven_last_updated_version',
-          description: 'Get the most recently updated version of a Maven dependency',
+          name: 'get_latest_release',
+          description: 'Get the latest release version of a Maven dependency (excludes pre-releases by default)',
           inputSchema: {
             type: 'object',
             properties: {
               dependency: {
                 type: 'string',
                 description: 'Maven coordinate in format "groupId:artifactId[:version][:packaging][:classifier]" (e.g. "org.springframework:spring-core" or "org.springframework:spring-core:5.3.20:jar")',
+              },
+              excludePreReleases: {
+                type: 'boolean',
+                description: 'Whether to exclude pre-release versions (alpha, beta, milestone, RC, snapshot). Default: true',
+                default: true,
               },
             },
             required: ['dependency'],
@@ -156,6 +176,11 @@ class MavenDepsServer {
                 minimum: 1,
                 maximum: 100,
               },
+              excludePreReleases: {
+                type: 'boolean',
+                description: 'Whether to exclude pre-release versions (alpha, beta, milestone, RC, snapshot). Default: true',
+                default: true,
+              },
             },
             required: ['dependency'],
           },
@@ -165,8 +190,8 @@ class MavenDepsServer {
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       switch (request.params.name) {
-        case 'get_maven_last_updated_version':
-          return this.handleGetLatestVersion(request.params.arguments);
+        case 'get_latest_release':
+          return this.handleGetLatestRelease(request.params.arguments);
         case 'check_maven_version_exists':
           return this.handleCheckVersionExists(request.params.arguments);
         case 'list_maven_versions':
@@ -180,8 +205,8 @@ class MavenDepsServer {
     });
   }
 
-  private async handleGetLatestVersion(args: unknown) {
-    if (!isValidMavenArgs(args)) {
+  private async handleGetLatestRelease(args: unknown) {
+    if (!isValidReleaseArgs(args)) {
       throw new McpError(
         ErrorCode.InvalidParams,
         'Invalid Maven dependency format'
@@ -189,6 +214,7 @@ class MavenDepsServer {
     }
 
     const coord = parseMavenCoordinate(args.dependency);
+    const excludePreReleases = args.excludePreReleases ?? true; // Default to true
 
     try {
       let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
@@ -200,7 +226,7 @@ class MavenDepsServer {
         params: {
           q: query,
           core: 'gav',
-          rows: 1,
+          rows: 100, // Get more results for filtering
           wt: 'json',
           sort: 'timestamp desc',
         },
@@ -218,8 +244,25 @@ class MavenDepsServer {
         };
       }
 
-      // Return the most recently updated version
-      const latestVersion = response.data.response.docs[0].v;
+      // Filter versions if needed
+      let versions = response.data.response.docs;
+      if (excludePreReleases) {
+        versions = versions.filter(doc => !isPreReleaseVersion(doc.v));
+        if (versions.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `No stable releases found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}. All available versions are pre-releases.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      // Return the most recently updated version (after filtering)
+      const latestVersion = versions[0].v;
       return {
         content: [
           {
@@ -317,6 +360,7 @@ class MavenDepsServer {
 
     const coord = parseMavenCoordinate(args.dependency);
     const depth = args.depth || 15;
+    const excludePreReleases = args.excludePreReleases ?? true; // Default to true
 
     try {
       let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
@@ -346,7 +390,27 @@ class MavenDepsServer {
         };
       }
 
-      const versions = response.data.response.docs
+      // Filter versions if needed
+      let filteredDocs = response.data.response.docs;
+      if (excludePreReleases) {
+        filteredDocs = filteredDocs.filter(doc => !isPreReleaseVersion(doc.v));
+      }
+
+      if (filteredDocs.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: excludePreReleases 
+                ? `No stable releases found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}. All available versions are pre-releases.`
+                : `No Maven dependency found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const versions = filteredDocs
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, depth)
         .map(doc => `${doc.v} (${new Date(doc.timestamp).toISOString().split('T')[0]})`);
