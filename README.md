@@ -30,10 +30,10 @@ npx -y @smithery/cli install maven-deps-server --client claude
 
 ## Features
 
-- Query the latest version of any Maven dependency
+- Query the most recently updated version of any Maven dependency
 - Verify if a Maven dependency exists
 - Check if a specific version of a dependency exists
-- List Maven dependency versions chronologically (newest first)
+- List Maven dependency versions sorted by last updated date (most recent first)
 - Support for full Maven coordinates including packaging and classifier
 - Real-time access to Maven Central Repository data
 - Compatible with multiple build tool formats (Maven, Gradle, SBT, Mill)
@@ -118,9 +118,9 @@ For remote access, use the server's IP or hostname in your client configuration:
 
 ## Available Tools
 
-### get_maven_latest_version
+### get_maven_last_updated_version
 
-Retrieves the latest version of a Maven dependency.
+Retrieves the most recently updated version of a Maven dependency. Note: This returns the version that was most recently published/updated to Maven Central, which may not always be the highest semantic version number.
 
 **Input Schema:**
 ```json
@@ -138,10 +138,10 @@ Retrieves the latest version of a Maven dependency.
 
 **Example Usage:**
 ```typescript
-const result = await mcpClient.callTool("maven-deps-server", "get_maven_latest_version", {
+const result = await mcpClient.callTool("maven-deps-server", "get_maven_last_updated_version", {
   dependency: "org.springframework:spring-core"
 });
-// Returns: "6.2.2"
+// Returns: "7.0.0-M6" (or whatever version was most recently updated)
 ```
 
 ### check_maven_version_exists
@@ -182,7 +182,7 @@ const result2 = await mcpClient.callTool("maven-deps-server", "check_maven_versi
 
 ### list_maven_versions
 
-Lists Maven dependency versions chronologically (newest first) with optional depth parameter.
+Lists Maven dependency versions sorted by last updated date (most recent first) with optional depth parameter. This shows when each version was published to Maven Central.
 
 **Input Schema:**
 ```json
@@ -228,10 +228,12 @@ const result2 = await mcpClient.callTool("maven-deps-server", "list_maven_versio
 
 - Uses Maven Central's REST API to fetch dependency information
 - Supports full Maven coordinates (groupId:artifactId:version:packaging:classifier)
-- Sorts results by timestamp to ensure the latest version is returned
+- Returns versions sorted by their last updated timestamp in Maven Central
 - Includes error handling for invalid dependencies and API issues
 - Returns clean, parseable version strings for valid dependencies
 - Provides boolean responses for version existence checks
+
+**Important Note:** The `get_maven_last_updated_version` tool returns the most recently published/updated version, not necessarily the highest semantic version. For example, if version 3.7.2 was published after version 4.0.0, the tool will return 3.7.2. Use `list_maven_versions` to see all available versions sorted by update date.
 
 ## Error Handling
 

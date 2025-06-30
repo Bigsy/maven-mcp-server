@@ -109,8 +109,8 @@ class MavenDepsServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
-          name: 'get_maven_latest_version',
-          description: 'Get the latest version of a Maven dependency',
+          name: 'get_maven_last_updated_version',
+          description: 'Get the most recently updated version of a Maven dependency',
           inputSchema: {
             type: 'object',
             properties: {
@@ -142,7 +142,7 @@ class MavenDepsServer {
         },
         {
           name: 'list_maven_versions',
-          description: 'List Maven dependency versions chronologically (newest first)',
+          description: 'List Maven dependency versions sorted by last updated date (most recent first)',
           inputSchema: {
             type: 'object',
             properties: {
@@ -165,7 +165,7 @@ class MavenDepsServer {
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       switch (request.params.name) {
-        case 'get_maven_latest_version':
+        case 'get_maven_last_updated_version':
           return this.handleGetLatestVersion(request.params.arguments);
         case 'check_maven_version_exists':
           return this.handleCheckVersionExists(request.params.arguments);
@@ -200,8 +200,9 @@ class MavenDepsServer {
         params: {
           q: query,
           core: 'gav',
-          rows: 100,
+          rows: 1,
           wt: 'json',
+          sort: 'timestamp desc',
         },
       });
 
@@ -217,20 +218,8 @@ class MavenDepsServer {
         };
       }
 
-      const versions = response.data.response.docs.map(doc => doc.v);
-      const latestVersion = versions.sort((a, b) => {
-        const aParts = a.split('.').map(Number);
-        const bParts = b.split('.').map(Number);
-        
-        for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-          const aNum = aParts[i] || 0;
-          const bNum = bParts[i] || 0;
-          if (aNum !== bNum) {
-            return bNum - aNum;
-          }
-        }
-        return 0;
-      })[0];
+      // Return the most recently updated version
+      const latestVersion = response.data.response.docs[0].v;
       return {
         content: [
           {
