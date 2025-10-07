@@ -107,7 +107,7 @@ class MavenDepsServer {
     );
 
     this.axiosInstance = axios.create({
-      baseURL: 'https://search.maven.org/solrsearch/select',
+      baseURL: 'https://central.sonatype.com/solrsearch/select',
     });
 
     this.setupToolHandlers();
@@ -217,9 +217,9 @@ class MavenDepsServer {
     const excludePreReleases = args.excludePreReleases ?? true; // Default to true
 
     try {
-      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
+      let query = `g:${coord.groupId}+AND+a:${coord.artifactId}`;
       if (coord.packaging) {
-        query += ` AND p:"${coord.packaging}"`;
+        query += `+AND+p:${coord.packaging}`;
       }
 
       const response = await this.axiosInstance.get<MavenSearchResponse>('', {
@@ -228,7 +228,7 @@ class MavenDepsServer {
           core: 'gav',
           rows: 100, // Get more results for filtering
           wt: 'json',
-          sort: 'timestamp desc',
+          sort: 'v+desc',
         },
       });
 
@@ -309,9 +309,9 @@ class MavenDepsServer {
     }
 
     try {
-      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}" AND v:"${version}"`;
+      let query = `g:${coord.groupId}+AND+a:${coord.artifactId}+AND+v:${version}`;
       if (coord.packaging) {
-        query += ` AND p:"${coord.packaging}"`;
+        query += `+AND+p:${coord.packaging}`;
       }
 
       const response = await this.axiosInstance.get<MavenSearchResponse>('', {
@@ -363,9 +363,9 @@ class MavenDepsServer {
     const excludePreReleases = args.excludePreReleases ?? true; // Default to true
 
     try {
-      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
+      let query = `g:${coord.groupId}+AND+a:${coord.artifactId}`;
       if (coord.packaging) {
-        query += ` AND p:"${coord.packaging}"`;
+        query += `+AND+p:${coord.packaging}`;
       }
 
       const response = await this.axiosInstance.get<MavenSearchResponse>('', {
@@ -374,7 +374,7 @@ class MavenDepsServer {
           core: 'gav',
           rows: 100,
           wt: 'json',
-          sort: 'timestamp desc',
+          sort: 'v+desc',
         },
       });
 
