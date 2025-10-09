@@ -1,6 +1,6 @@
 {
   "name": "mcp-maven-deps",
-  "version": "0.1.4",
+  "version": "0.1.7",
   "description": "An MCP server that provides tools for checking Maven dependency versions",
   "type": "module",
   "bin": {
