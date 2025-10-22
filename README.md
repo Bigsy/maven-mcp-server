@@ -3,7 +3,7 @@
 
 An MCP (Model Context Protocol) server that provides tools for checking Maven dependency versions. This server enables LLMs to verify Maven dependencies and retrieve their latest versions from Maven Central Repository.
 
-<a href="https://glama.ai/mcp/servers/juuo2ye0qi"><img width="380" height="200" src="https://glama.ai/mcp/servers/juuo2ye0qi/badge" alt="maven-mcp-server MCP server" /></a> 
+<a href="https://glama.ai/mcp/servers/juuo2ye0qi"><img width="380" height="200" src="https://glama.ai/mcp/servers/juuo2ye0qi/badge" alt="maven-mcp-server MCP server" /></a>
 
 
 ## Installation
@@ -146,14 +146,14 @@ Retrieves the latest stable release version of a Maven dependency. By default, t
 ```typescript
 // Get latest stable release (default behavior)
 const result1 = await mcpClient.callTool("maven-deps-server", "get_latest_release", {
-  dependency: "org.springframework:spring-core"
+    dependency: "org.springframework:spring-core"
 });
 // Returns: "6.2.8" (latest stable, excludes "7.0.0-M6" milestone)
 
 // Include pre-releases if needed
 const result2 = await mcpClient.callTool("maven-deps-server", "get_latest_release", {
-  dependency: "org.springframework:spring-core",
-  excludePreReleases: false
+    dependency: "org.springframework:spring-core",
+    excludePreReleases: false
 });
 // Returns: "7.0.0-M6" (includes pre-releases)
 ```
@@ -184,13 +184,13 @@ Checks if a specific version of a Maven dependency exists. The version can be pr
 ```typescript
 // Using version in dependency string
 const result1 = await mcpClient.callTool("maven-deps-server", "check_maven_version_exists", {
-  dependency: "org.springframework:spring-core:5.3.20"
+    dependency: "org.springframework:spring-core:5.3.20"
 });
 
 // Using separate version parameter
 const result2 = await mcpClient.callTool("maven-deps-server", "check_maven_version_exists", {
-  dependency: "org.springframework:spring-core",
-  version: "5.3.20"
+    dependency: "org.springframework:spring-core",
+    version: "5.3.20"
 });
 ```
 
@@ -227,34 +227,37 @@ Lists Maven dependency versions sorted by last updated date (most recent first) 
 ```typescript
 // Get last 15 stable versions (default - excludes pre-releases)
 const result1 = await mcpClient.callTool("maven-deps-server", "list_maven_versions", {
-  dependency: "org.springframework:spring-core"
+    dependency: "org.springframework:spring-core"
 });
 // Returns only stable versions: "6.2.8 (2025-06-12)\n6.1.21 (2025-06-12)\n6.2.7 (2025-05-15)\n..."
 
 // Get last 5 versions including pre-releases
 const result2 = await mcpClient.callTool("maven-deps-server", "list_maven_versions", {
-  dependency: "org.springframework:spring-core",
-  depth: 5,
-  excludePreReleases: false
+    dependency: "org.springframework:spring-core",
+    depth: 5,
+    excludePreReleases: false
 });
 // Returns: "7.0.0-M6 (2025-06-12)\n6.2.8 (2025-06-12)\n6.1.21 (2025-06-12)\n7.0.0-M5 (2025-05-15)\n6.2.7 (2025-05-15)"
 ```
 
 ## Implementation Details
 
-- Uses Maven Central's REST API to fetch dependency information
+- Primary source: Maven Central's `maven-metadata.xml` for accurate and up-to-date version information
+- Fallback: Maven Central's Solr Search API when metadata is unavailable
 - Supports full Maven coordinates (groupId:artifactId:version:packaging:classifier)
 - Intelligent pre-release detection using regex pattern matching
-- Returns versions sorted by their last updated timestamp in Maven Central
+- Returns versions sorted by their release order (most recent first)
 - Includes error handling for invalid dependencies and API issues
 - Returns clean, parseable version strings for valid dependencies
 - Provides boolean responses for version existence checks
+
+**Note:** Version 0.1.8+ uses `maven-metadata.xml` as the primary source to ensure the latest versions are always returned, even if they haven't been indexed in the Solr search API yet. This fixes issues where newly released versions (like mockito-kotlin 6.1.0) were not being detected.
 
 ## Pre-release Detection
 
 The server automatically detects pre-release versions using the following patterns:
 - **Alpha**: `-alpha`, `-a`
-- **Beta**: `-beta`, `-b` 
+- **Beta**: `-beta`, `-b`
 - **Milestone**: `-milestone`, `-m`, `-M`
 - **Release Candidate**: `-rc`, `-cr`
 - **Snapshot**: `-snapshot`
