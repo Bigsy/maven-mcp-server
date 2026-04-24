@@ -196,7 +196,7 @@ const result2 = await mcpClient.callTool("maven-deps-server", "check_maven_versi
 
 ### list_maven_versions
 
-Lists Maven dependency versions sorted by last updated date (most recent first) with optional pre-release filtering and depth control.
+Lists Maven dependency versions in deploy order, most recent first, with optional pre-release filtering and depth control. Output is one version per line.
 
 **Input Schema:**
 ```json
@@ -229,7 +229,7 @@ Lists Maven dependency versions sorted by last updated date (most recent first) 
 const result1 = await mcpClient.callTool("maven-deps-server", "list_maven_versions", {
   dependency: "org.springframework:spring-core"
 });
-// Returns only stable versions: "6.2.8 (2025-06-12)\n6.1.21 (2025-06-12)\n6.2.7 (2025-05-15)\n..."
+// Returns only stable versions: "6.2.8\n6.1.21\n6.2.7\n..."
 
 // Get last 5 versions including pre-releases
 const result2 = await mcpClient.callTool("maven-deps-server", "list_maven_versions", {
@@ -237,15 +237,15 @@ const result2 = await mcpClient.callTool("maven-deps-server", "list_maven_versio
   depth: 5,
   excludePreReleases: false
 });
-// Returns: "7.0.0-M6 (2025-06-12)\n6.2.8 (2025-06-12)\n6.1.21 (2025-06-12)\n7.0.0-M5 (2025-05-15)\n6.2.7 (2025-05-15)"
+// Returns: "7.0.0-M6\n6.2.8\n6.1.21\n7.0.0-M5\n6.2.7"
 ```
 
 ## Implementation Details
 
-- Uses Maven Central's REST API to fetch dependency information
+- Queries `maven-metadata.xml` on Maven Central directly (`https://repo1.maven.org/maven2/<g>/<a>/maven-metadata.xml`) — the authoritative file Maven and Gradle themselves consult during dependency resolution. It updates within seconds of a deploy, so results are never stale.
 - Supports full Maven coordinates (groupId:artifactId:version:packaging:classifier)
 - Intelligent pre-release detection using regex pattern matching
-- Returns versions sorted by their last updated timestamp in Maven Central
+- Returns versions in deploy order (most recent first) as recorded in `maven-metadata.xml`
 - Includes error handling for invalid dependencies and API issues
 - Returns clean, parseable version strings for valid dependencies
 - Provides boolean responses for version existence checks

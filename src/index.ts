@@ -11,19 +11,16 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
+import { XMLParser } from 'fast-xml-parser';
 
-interface MavenSearchResponse {
-  response: {
-    docs: Array<{
-      id: string;
-      g: string; // groupId
-      a: string; // artifactId
-      v: string; // version
-      p?: string; // packaging
-      timestamp: number;
-    }>;
-  };
-}
+// Data source: the authoritative maven-metadata.xml on Maven Central, not the
+// search.maven.org Solr index. The Solr index has been observed to lag by up
+// to a year (see issue #12) because it's updated by an async indexer that can
+// stall. maven-metadata.xml is the file Maven and Gradle themselves consult
+// during dependency resolution — it updates within seconds of a deploy and
+// exposes explicit <release> / <latest> / <versions> elements, so client-side
+// version sorting (the root cause of the stale-data complaints) is no longer
+// needed.
 
 interface MavenCoordinate {
   groupId: string;
@@ -31,6 +28,14 @@ interface MavenCoordinate {
   version?: string;
   packaging?: string;
   classifier?: string;
+}
+
+// Shape of the subset of maven-metadata.xml we consume.
+interface MavenMetadata {
+  latest?: string;
+  release?: string;
+  versions: string[]; // in deploy order, oldest first
+  lastUpdated?: string;
 }
 
 const parseMavenCoordinate = (dependency: string): MavenCoordinate => {
@@ -57,13 +62,6 @@ const isPreReleaseVersion = (version: string): boolean => {
   return preReleasePattern.test(version);
 };
 
-const isValidMavenArgs = (
-  args: any
-): args is { dependency: string } =>
-  typeof args === 'object' &&
-  args !== null &&
-  typeof args.dependency === 'string';
-
 const isValidVersionCheckArgs = (
   args: any
 ): args is { dependency: string; version?: string } =>
@@ -89,6 +87,22 @@ const isValidListVersionsArgs = (
   (args.depth === undefined || (typeof args.depth === 'number' && args.depth > 0)) &&
   (args.excludePreReleases === undefined || typeof args.excludePreReleases === 'boolean');
 
+const METADATA_BASE = 'https://repo1.maven.org/maven2';
+
+const metadataPath = (coord: MavenCoordinate): string => {
+  const g = coord.groupId.split('.').map(encodeURIComponent).join('/');
+  const a = encodeURIComponent(coord.artifactId);
+  return `/${g}/${a}/maven-metadata.xml`;
+};
+
+const coordLabel = (coord: MavenCoordinate): string =>
+  `${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}`;
+
+const xmlParser = new XMLParser({
+  ignoreAttributes: true,
+  parseTagValue: false, // keep version strings as-is; don't coerce "1.0" to a number
+});
+
 class MavenDepsServer {
   private server: Server;
   private axiosInstance;
@@ -107,17 +121,45 @@ class MavenDepsServer {
     );
 
     this.axiosInstance = axios.create({
-      baseURL: 'https://search.maven.org/solrsearch/select',
+      baseURL: METADATA_BASE,
+      responseType: 'text',
+      // fast-xml-parser needs the raw string; suppress axios' auto JSON parse.
+      transformResponse: (data) => data,
     });
 
     this.setupToolHandlers();
-    
+
     // Error handling
     this.server.onerror = (error) => console.error('[MCP Error]', error);
     process.on('SIGINT', async () => {
       await this.server.close();
       process.exit(0);
     });
+  }
+
+  private async fetchMetadata(coord: MavenCoordinate): Promise<MavenMetadata | null> {
+    try {
+      const response = await this.axiosInstance.get<string>(metadataPath(coord));
+      const parsed = xmlParser.parse(response.data);
+      const versioning = parsed?.metadata?.versioning ?? {};
+      const rawVersions = versioning.versions?.version;
+      const versions: string[] = Array.isArray(rawVersions)
+        ? rawVersions
+        : rawVersions
+          ? [rawVersions]
+          : [];
+      return {
+        latest: versioning.latest,
+        release: versioning.release,
+        versions,
+        lastUpdated: versioning.lastUpdated,
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private setupToolHandlers() {
@@ -162,7 +204,7 @@ class MavenDepsServer {
         },
         {
           name: 'list_maven_versions',
-          description: 'List Maven dependency versions sorted by last updated date (most recent first)',
+          description: 'List Maven dependency versions in deploy order (most recent first)',
           inputSchema: {
             type: 'object',
             properties: {
@@ -205,6 +247,33 @@ class MavenDepsServer {
     });
   }
 
+  private notFound(coord: MavenCoordinate) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `No Maven dependency found for ${coordLabel(coord)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  private mavenError(error: unknown) {
+    if (axios.isAxiosError(error)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Maven Central API error: ${error.response?.statusText ?? error.message}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    throw error;
+  }
+
   private async handleGetLatestRelease(args: unknown) {
     if (!isValidReleaseArgs(args)) {
       throw new McpError(
@@ -217,43 +286,23 @@ class MavenDepsServer {
     const excludePreReleases = args.excludePreReleases ?? true; // Default to true
 
     try {
-      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
-      if (coord.packaging) {
-        query += ` AND p:"${coord.packaging}"`;
+      const meta = await this.fetchMetadata(coord);
+      if (!meta || meta.versions.length === 0) {
+        return this.notFound(coord);
       }
 
-      const response = await this.axiosInstance.get<MavenSearchResponse>('', {
-        params: {
-          q: query,
-          core: 'gav',
-          rows: 100, // Get more results for filtering
-          wt: 'json',
-          sort: 'timestamp desc',
-        },
-      });
-
-      if (!response.data.response.docs.length) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `No Maven dependency found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      // Filter versions if needed
-      let versions = response.data.response.docs;
+      // <versions> is oldest-first; reverse for newest deploy first. We always
+      // filter client-side rather than trusting <release>, since <release> can
+      // point at a version we classify as a pre-release qualifier.
+      let candidates = [...meta.versions].reverse();
       if (excludePreReleases) {
-        versions = versions.filter(doc => !isPreReleaseVersion(doc.v));
-        if (versions.length === 0) {
+        candidates = candidates.filter(v => !isPreReleaseVersion(v));
+        if (candidates.length === 0) {
           return {
             content: [
               {
                 type: 'text',
-                text: `No stable releases found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}. All available versions are pre-releases.`,
+                text: `No stable releases found for ${coordLabel(coord)}. All available versions are pre-releases.`,
               },
             ],
             isError: true,
@@ -261,31 +310,16 @@ class MavenDepsServer {
         }
       }
 
-      // Return the most recently updated version (after filtering)
-      const latestVersion = versions[0].v;
       return {
         content: [
           {
             type: 'text',
-            text: latestVersion,
+            text: candidates[0],
           },
         ],
       };
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Maven Central API error: ${
-                error.response?.data?.error?.msg ?? error.message
-              }`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      throw error;
+      return this.mavenError(error);
     }
   }
 
@@ -300,7 +334,7 @@ class MavenDepsServer {
     const coord = parseMavenCoordinate(args.dependency);
     // Use version from coordinate if available, otherwise use the version parameter
     const version = coord.version || args.version;
-    
+
     if (!version) {
       throw new McpError(
         ErrorCode.InvalidParams,
@@ -309,21 +343,8 @@ class MavenDepsServer {
     }
 
     try {
-      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}" AND v:"${version}"`;
-      if (coord.packaging) {
-        query += ` AND p:"${coord.packaging}"`;
-      }
-
-      const response = await this.axiosInstance.get<MavenSearchResponse>('', {
-        params: {
-          q: query,
-          core: 'gav',
-          rows: 1,
-          wt: 'json',
-        },
-      });
-
-      const exists = response.data.response.docs.length > 0;
+      const meta = await this.fetchMetadata(coord);
+      const exists = meta !== null && meta.versions.includes(version);
       return {
         content: [
           {
@@ -333,20 +354,7 @@ class MavenDepsServer {
         ],
       };
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Maven Central API error: ${
-                error.response?.data?.error?.msg ?? error.message
-              }`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      throw error;
+      return this.mavenError(error);
     }
   }
 
@@ -363,87 +371,50 @@ class MavenDepsServer {
     const excludePreReleases = args.excludePreReleases ?? true; // Default to true
 
     try {
-      let query = `g:"${coord.groupId}" AND a:"${coord.artifactId}"`;
-      if (coord.packaging) {
-        query += ` AND p:"${coord.packaging}"`;
+      const meta = await this.fetchMetadata(coord);
+      if (!meta || meta.versions.length === 0) {
+        return this.notFound(coord);
       }
 
-      const response = await this.axiosInstance.get<MavenSearchResponse>('', {
-        params: {
-          q: query,
-          core: 'gav',
-          rows: 100,
-          wt: 'json',
-          sort: 'timestamp desc',
-        },
-      });
-
-      if (!response.data.response.docs.length) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `No Maven dependency found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      // Filter versions if needed
-      let filteredDocs = response.data.response.docs;
+      // <versions> is oldest-first; reverse for newest-first, then optionally
+      // filter. maven-metadata.xml has no per-version timestamps, so output is
+      // one version per line (previously "X.Y.Z (YYYY-MM-DD)").
+      let versions = [...meta.versions].reverse();
       if (excludePreReleases) {
-        filteredDocs = filteredDocs.filter(doc => !isPreReleaseVersion(doc.v));
+        versions = versions.filter(v => !isPreReleaseVersion(v));
       }
 
-      if (filteredDocs.length === 0) {
+      if (versions.length === 0) {
         return {
           content: [
             {
               type: 'text',
-              text: excludePreReleases 
-                ? `No stable releases found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}. All available versions are pre-releases.`
-                : `No Maven dependency found for ${coord.groupId}:${coord.artifactId}${coord.packaging ? ':' + coord.packaging : ''}`,
+              text: excludePreReleases
+                ? `No stable releases found for ${coordLabel(coord)}. All available versions are pre-releases.`
+                : `No Maven dependency found for ${coordLabel(coord)}`,
             },
           ],
           isError: true,
         };
       }
 
-      const versions = filteredDocs
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, depth)
-        .map(doc => `${doc.v} (${new Date(doc.timestamp).toISOString().split('T')[0]})`);
-
+      const out = versions.slice(0, depth).join('\n');
       return {
         content: [
           {
             type: 'text',
-            text: versions.join('\n'),
+            text: out,
           },
         ],
       };
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Maven Central API error: ${
-                error.response?.data?.error?.msg ?? error.message
-              }`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      throw error;
+      return this.mavenError(error);
     }
   }
 
   async run(opts?: { port?: number; host?: string }) {
     let transport: StdioServerTransport | SSEServerTransport | undefined;
-    
+
     if (opts?.port) {
       const app = express();
       const httpServer = createServer(app);
