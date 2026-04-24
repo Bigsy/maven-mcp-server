@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 
 import axios from 'axios';
+import { XMLParser } from 'fast-xml-parser';
 
-// Test configuration
+// Sanity test: probes Maven Central directly (not the MCP server) to verify
+// that maven-metadata.xml still returns fresh data for a few representative
+// artifacts. This is the same data source the MCP server consumes.
+
 const testDependencies = [
   {
     name: 'kafka-clients',
     dependency: 'org.apache.kafka:kafka-clients',
-    description: 'Should return the most recently updated version'
+    description: 'Should return the current release from maven-metadata.xml'
   },
   {
     name: 'google-api-services-drive',
@@ -21,92 +25,95 @@ const testDependencies = [
   }
 ];
 
-async function testMavenAPI() {
-  console.log('Testing Maven Central API directly...\n');
-  
+const parser = new XMLParser({ ignoreAttributes: true, parseTagValue: false });
+
+function metadataUrl(groupId, artifactId) {
+  const g = groupId.split('.').map(encodeURIComponent).join('/');
+  const a = encodeURIComponent(artifactId);
+  return `https://repo1.maven.org/maven2/${g}/${a}/maven-metadata.xml`;
+}
+
+async function fetchMetadata(groupId, artifactId) {
+  const response = await axios.get(metadataUrl(groupId, artifactId), { responseType: 'text', transformResponse: d => d });
+  const parsed = parser.parse(response.data);
+  const versioning = parsed?.metadata?.versioning ?? {};
+  const raw = versioning.versions?.version;
+  const versions = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return {
+    release: versioning.release,
+    latest: versioning.latest,
+    versions,
+    lastUpdated: versioning.lastUpdated,
+  };
+}
+
+async function testMavenMetadata() {
+  console.log('Testing Maven Central maven-metadata.xml directly...\n');
+
   for (const test of testDependencies) {
     console.log(`\nTesting ${test.name}:`);
     console.log(`Dependency: ${test.dependency}`);
     console.log(`Description: ${test.description}`);
-    
+
     try {
-      // Parse dependency
       const [groupId, artifactId] = test.dependency.split(':');
-      
-      // Test getting the most recently updated version
-      const response = await axios.get('https://search.maven.org/solrsearch/select', {
-        params: {
-          q: `g:"${groupId}" AND a:"${artifactId}"`,
-          core: 'gav',
-          rows: 5,
-          wt: 'json',
-          sort: 'timestamp desc'
-        }
-      });
-      
-      if (response.data.response.docs.length > 0) {
-        const mostRecent = response.data.response.docs[0];
-        console.log(`\nMost recently updated version: ${mostRecent.v}`);
-        console.log(`Last updated: ${new Date(mostRecent.timestamp).toISOString()}`);
-        
-        console.log('\nTop 5 versions by last updated date:');
-        response.data.response.docs.forEach((doc, index) => {
-          console.log(`${index + 1}. ${doc.v} - ${new Date(doc.timestamp).toISOString().split('T')[0]}`);
-        });
-      } else {
+      const meta = await fetchMetadata(groupId, artifactId);
+
+      if (meta.versions.length === 0) {
         console.log('No versions found!');
+        continue;
       }
-      
+
+      console.log(`\n<release>: ${meta.release ?? '(not present)'}`);
+      console.log(`<latest>:  ${meta.latest ?? '(not present)'}`);
+      console.log(`<lastUpdated>: ${meta.lastUpdated ?? '(not present)'}`);
+
+      console.log('\nTop 5 versions (newest deploy first):');
+      const newestFirst = [...meta.versions].reverse();
+      newestFirst.slice(0, 5).forEach((v, i) => {
+        console.log(`${i + 1}. ${v}`);
+      });
+
     } catch (error) {
       console.error(`Error testing ${test.name}:`, error.message);
     }
   }
-  
+
   console.log('\n\nSummary:');
-  console.log('The server now returns the most recently updated version, not necessarily the highest semantic version.');
-  console.log('Users who need specific versions can use list_maven_versions to see all versions sorted by update date.');
+  console.log('maven-metadata.xml is the authoritative source Maven/Gradle themselves use.');
+  console.log('It updates seconds after a deploy, so "latest" here is always current.');
 }
 
 // Test the pre-release filtering functionality
 async function testPreReleaseFiltering() {
   console.log('\n\n=== Testing Pre-release Filtering ===\n');
 
-  // Function to test if version is pre-release (same as in server)
   const isPreReleaseVersion = (version) => {
     const preReleasePattern = /-(alpha|a|beta|b|milestone|m|rc|cr|snapshot)/i;
     return preReleasePattern.test(version);
   };
 
-  // Test with Spring Core (has M6 milestone versions)
   console.log('Testing Spring Core pre-release filtering:');
   try {
-    const response = await axios.get('https://search.maven.org/solrsearch/select', {
-      params: {
-        q: 'g:"org.springframework" AND a:"spring-core"',
-        core: 'gav',
-        rows: 10,
-        wt: 'json',
-        sort: 'timestamp desc',
-      }
-    });
+    const meta = await fetchMetadata('org.springframework', 'spring-core');
+    const newestFirst = [...meta.versions].reverse();
 
-    if (response.data.response.docs.length > 0) {
-      console.log('\nAll versions (top 5):');
-      response.data.response.docs.slice(0, 5).forEach((doc, i) => {
-        const badge = isPreReleaseVersion(doc.v) ? ' [PRE-RELEASE]' : ' [STABLE]';
-        console.log(`${i + 1}. ${doc.v} (${new Date(doc.timestamp).toISOString().split('T')[0]})${badge}`);
+    if (newestFirst.length > 0) {
+      console.log('\nAll versions (top 5, newest deploy first):');
+      newestFirst.slice(0, 5).forEach((v, i) => {
+        const badge = isPreReleaseVersion(v) ? ' [PRE-RELEASE]' : ' [STABLE]';
+        console.log(`${i + 1}. ${v}${badge}`);
       });
 
-      // Filter stable versions
-      const stableVersions = response.data.response.docs.filter(doc => !isPreReleaseVersion(doc.v));
-      console.log(`\n✅ Latest stable release (filtered): ${stableVersions[0]?.v || 'None found'}`);
-      console.log(`⚠️  Latest overall (unfiltered): ${response.data.response.docs[0].v}`);
+      const stableVersions = newestFirst.filter(v => !isPreReleaseVersion(v));
+      console.log(`\nLatest stable release (filtered): ${stableVersions[0] ?? 'None found'}`);
+      console.log(`Latest overall (unfiltered):       ${newestFirst[0]}`);
+      console.log(`<release> from metadata.xml:       ${meta.release ?? '(not present)'}`);
     }
   } catch (error) {
     console.error('Error testing Spring Core:', error.message);
   }
 
-  // Test regex pattern
   console.log('\n=== Pre-release Pattern Tests ===');
   const versionTests = [
     { version: '7.0.0-M6', expected: true },
@@ -119,14 +126,13 @@ async function testPreReleaseFiltering() {
 
   versionTests.forEach(test => {
     const result = isPreReleaseVersion(test.version);
-    const status = result === test.expected ? '✅' : '❌';
+    const status = result === test.expected ? 'PASS' : 'FAIL';
     console.log(`${status} ${test.version} -> ${result}`);
   });
 }
 
-// Run both test suites
 async function runAllTests() {
-  await testMavenAPI();
+  await testMavenMetadata();
   await testPreReleaseFiltering();
 }
 
